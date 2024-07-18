@@ -1,0 +1,180 @@
+<html>
+<head>
+<title>Coordinator.java</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<style type="text/css">
+.s0 { color: #cf8e6d;}
+.s1 { color: #bcbec4;}
+.s2 { color: #bcbec4;}
+.s3 { color: #7a7e85;}
+.s4 { color: #2aacb8;}
+.s5 { color: #6aab73;}
+.ln { color: #4b5059; font-weight: normal; font-style: normal; }
+</style>
+</head>
+<body bgcolor="#1e1f22">
+<table CELLSPACING=0 CELLPADDING=5 COLS=1 WIDTH="100%" BGCOLOR="#606060" >
+<tr><td><center>
+<font face="Arial, Helvetica" color="#000000">
+Coordinator.java</font>
+</center></td></tr></table>
+<pre><a name="l1"><span class="ln">1    </span></a><span class="s0">package </span><span class="s1">it</span><span class="s2">.</span><span class="s1">unitn</span><span class="s2">.</span><span class="s1">ds1</span><span class="s2">;</span>
+<a name="l2"><span class="ln">2    </span></a>
+<a name="l3"><span class="ln">3    </span></a><span class="s0">import </span><span class="s1">akka</span><span class="s2">.</span><span class="s1">actor</span><span class="s2">.</span><span class="s1">AbstractActor</span><span class="s2">;</span>
+<a name="l4"><span class="ln">4    </span></a><span class="s0">import </span><span class="s1">akka</span><span class="s2">.</span><span class="s1">actor</span><span class="s2">.</span><span class="s1">ActorRef</span><span class="s2">;</span>
+<a name="l5"><span class="ln">5    </span></a><span class="s0">import </span><span class="s1">akka</span><span class="s2">.</span><span class="s1">actor</span><span class="s2">.</span><span class="s1">Cancellable</span><span class="s2">;</span>
+<a name="l6"><span class="ln">6    </span></a><span class="s0">import </span><span class="s1">akka</span><span class="s2">.</span><span class="s1">actor</span><span class="s2">.</span><span class="s1">Props</span><span class="s2">;</span>
+<a name="l7"><span class="ln">7    </span></a><span class="s0">import </span><span class="s1">scala</span><span class="s2">.</span><span class="s1">concurrent</span><span class="s2">.</span><span class="s1">duration</span><span class="s2">.</span><span class="s1">Duration</span><span class="s2">;</span>
+<a name="l8"><span class="ln">8    </span></a>
+<a name="l9"><span class="ln">9    </span></a><span class="s0">import </span><span class="s1">java</span><span class="s2">.</span><span class="s1">io</span><span class="s2">.</span><span class="s1">Serializable</span><span class="s2">;</span>
+<a name="l10"><span class="ln">10   </span></a><span class="s0">import </span><span class="s1">java</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.*;</span>
+<a name="l11"><span class="ln">11   </span></a><span class="s0">import </span><span class="s1">java</span><span class="s2">.</span><span class="s1">util</span><span class="s2">.</span><span class="s1">concurrent</span><span class="s2">.</span><span class="s1">TimeUnit</span><span class="s2">;</span>
+<a name="l12"><span class="ln">12   </span></a>
+<a name="l13"><span class="ln">13   </span></a><span class="s0">import static </span><span class="s1">it</span><span class="s2">.</span><span class="s1">unitn</span><span class="s2">.</span><span class="s1">ds1</span><span class="s2">.</span><span class="s1">TwoPhaseCommit</span><span class="s2">.*;</span>
+<a name="l14"><span class="ln">14   </span></a>
+<a name="l15"><span class="ln">15   </span></a><span class="s3">/*-- Coordinator -----------------------------------------------------------*/</span>
+<a name="l16"><span class="ln">16   </span></a>
+<a name="l17"><span class="ln">17   </span></a><span class="s0">public class </span><span class="s1">Coordinator </span><span class="s0">extends </span><span class="s1">Node </span><span class="s2">{</span>
+<a name="l18"><span class="ln">18   </span></a>
+<a name="l19"><span class="ln">19   </span></a>    <span class="s3">// here all the nodes that sent YES are collected</span>
+<a name="l20"><span class="ln">20   </span></a>    <span class="s0">private final </span><span class="s1">Set</span><span class="s2">&lt;</span><span class="s1">ActorRef</span><span class="s2">&gt; </span><span class="s1">yesVoters </span><span class="s2">= </span><span class="s0">new </span><span class="s1">HashSet</span><span class="s2">&lt;&gt;();</span>
+<a name="l21"><span class="ln">21   </span></a>    <span class="s0">private </span><span class="s1">Set</span><span class="s2">&lt;</span><span class="s1">ActorRef</span><span class="s2">&gt; </span><span class="s1">ackVoters </span><span class="s2">= </span><span class="s0">new </span><span class="s1">HashSet</span><span class="s2">&lt;&gt;();</span>
+<a name="l22"><span class="ln">22   </span></a>    <span class="s0">private int </span><span class="s1">pendingValue </span><span class="s2">= </span><span class="s4">0</span><span class="s2">;  </span><span class="s3">// This holds the value pending confirmation</span>
+<a name="l23"><span class="ln">23   </span></a>    <span class="s0">private boolean </span><span class="s1">writeConfirmed </span><span class="s2">= </span><span class="s0">false</span><span class="s2">;  </span><span class="s3">// To track if the write confirmation has been sent</span>
+<a name="l24"><span class="ln">24   </span></a>    <span class="s0">private </span><span class="s1">Cancellable heartbeatTask</span><span class="s2">;  </span><span class="s3">// To manage the heartbeat sending task</span>
+<a name="l25"><span class="ln">25   </span></a>
+<a name="l26"><span class="ln">26   </span></a>    <span class="s0">boolean </span><span class="s1">allVotedYes</span><span class="s2">() { </span><span class="s3">// returns true if all voted YES</span>
+<a name="l27"><span class="ln">27   </span></a>        <span class="s0">return </span><span class="s1">yesVoters</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() &gt;= </span><span class="s1">N_REPLICAS</span><span class="s2">;</span>
+<a name="l28"><span class="ln">28   </span></a>    <span class="s2">}</span>
+<a name="l29"><span class="ln">29   </span></a>
+<a name="l30"><span class="ln">30   </span></a>    <span class="s0">public </span><span class="s1">Coordinator</span><span class="s2">() {</span>
+<a name="l31"><span class="ln">31   </span></a>        <span class="s0">super</span><span class="s2">(-</span><span class="s4">1</span><span class="s2">, -</span><span class="s4">1</span><span class="s2">); </span><span class="s3">// the coordinator has the id -1</span>
+<a name="l32"><span class="ln">32   </span></a>    <span class="s2">}</span>
+<a name="l33"><span class="ln">33   </span></a>
+<a name="l34"><span class="ln">34   </span></a>    <span class="s0">static public </span><span class="s1">Props props</span><span class="s2">() {</span>
+<a name="l35"><span class="ln">35   </span></a>        <span class="s0">return </span><span class="s1">Props</span><span class="s2">.</span><span class="s1">create</span><span class="s2">(</span><span class="s1">Coordinator</span><span class="s2">.</span><span class="s0">class</span><span class="s2">, </span><span class="s1">Coordinator::</span><span class="s0">new</span><span class="s2">);</span>
+<a name="l36"><span class="ln">36   </span></a>    <span class="s2">}</span>
+<a name="l37"><span class="ln">37   </span></a>
+<a name="l38"><span class="ln">38   </span></a>    <span class="s1">@Override</span>
+<a name="l39"><span class="ln">39   </span></a>    <span class="s0">public </span><span class="s1">Receive createReceive</span><span class="s2">() {</span>
+<a name="l40"><span class="ln">40   </span></a>        <span class="s0">return </span><span class="s1">receiveBuilder</span><span class="s2">()</span>
+<a name="l41"><span class="ln">41   </span></a>                <span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s1">StartMessage</span><span class="s2">.</span><span class="s0">class</span><span class="s2">, </span><span class="s0">this</span><span class="s1">::onStartMessage</span><span class="s2">)</span>
+<a name="l42"><span class="ln">42   </span></a>                <span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s1">UpdateRequest</span><span class="s2">.</span><span class="s0">class</span><span class="s2">, </span><span class="s0">this</span><span class="s1">::onUpdateRequest</span><span class="s2">)</span>
+<a name="l43"><span class="ln">43   </span></a>                <span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s1">Acknowledge</span><span class="s2">.</span><span class="s0">class</span><span class="s2">, </span><span class="s0">this</span><span class="s1">::onAcknowledge</span><span class="s2">)</span>
+<a name="l44"><span class="ln">44   </span></a>                <span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s1">VoteResponse</span><span class="s2">.</span><span class="s0">class</span><span class="s2">, </span><span class="s0">this</span><span class="s1">::onVoteResponse</span><span class="s2">)</span>
+<a name="l45"><span class="ln">45   </span></a>                <span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s1">Timeout</span><span class="s2">.</span><span class="s0">class</span><span class="s2">, </span><span class="s0">this</span><span class="s1">::onTimeout</span><span class="s2">)</span>
+<a name="l46"><span class="ln">46   </span></a>                <span class="s2">.</span><span class="s1">match</span><span class="s2">(</span><span class="s1">DecisionRequest</span><span class="s2">.</span><span class="s0">class</span><span class="s2">, </span><span class="s0">this</span><span class="s1">::onDecisionRequest</span><span class="s2">)</span>
+<a name="l47"><span class="ln">47   </span></a>                <span class="s2">.</span><span class="s1">build</span><span class="s2">();</span>
+<a name="l48"><span class="ln">48   </span></a>    <span class="s2">}</span>
+<a name="l49"><span class="ln">49   </span></a>
+<a name="l50"><span class="ln">50   </span></a>    <span class="s3">// This method sets up a task to send heartbeat messages</span>
+<a name="l51"><span class="ln">51   </span></a>    <span class="s0">private void </span><span class="s1">startHeartbeat</span><span class="s2">() {</span>
+<a name="l52"><span class="ln">52   </span></a>        <span class="s1">heartbeatTask </span><span class="s2">= </span><span class="s1">getContext</span><span class="s2">().</span><span class="s1">getSystem</span><span class="s2">().</span><span class="s1">scheduler</span><span class="s2">().</span><span class="s1">scheduleAtFixedRate</span><span class="s2">(</span>
+<a name="l53"><span class="ln">53   </span></a>                <span class="s1">Duration</span><span class="s2">.</span><span class="s1">create</span><span class="s2">(</span><span class="s4">5</span><span class="s2">, </span><span class="s1">TimeUnit</span><span class="s2">.</span><span class="s1">SECONDS</span><span class="s2">), </span><span class="s3">// Start after 5 seconds</span>
+<a name="l54"><span class="ln">54   </span></a>                <span class="s1">Duration</span><span class="s2">.</span><span class="s1">create</span><span class="s2">(</span><span class="s4">5</span><span class="s2">, </span><span class="s1">TimeUnit</span><span class="s2">.</span><span class="s1">SECONDS</span><span class="s2">), </span><span class="s3">// Repeat every 5 seconds</span>
+<a name="l55"><span class="ln">55   </span></a>                <span class="s0">this</span><span class="s1">::sendHeartbeat</span><span class="s2">,</span>
+<a name="l56"><span class="ln">56   </span></a>                <span class="s1">getContext</span><span class="s2">().</span><span class="s1">getSystem</span><span class="s2">().</span><span class="s1">dispatcher</span><span class="s2">()</span>
+<a name="l57"><span class="ln">57   </span></a>        <span class="s2">);</span>
+<a name="l58"><span class="ln">58   </span></a>    <span class="s2">}</span>
+<a name="l59"><span class="ln">59   </span></a>
+<a name="l60"><span class="ln">60   </span></a>    <span class="s3">// Sends a heartbeat to all participants except itself</span>
+<a name="l61"><span class="ln">61   </span></a>    <span class="s0">private void </span><span class="s1">sendHeartbeat</span><span class="s2">() {</span>
+<a name="l62"><span class="ln">62   </span></a>        <span class="s0">for </span><span class="s2">(</span><span class="s1">ActorRef participant </span><span class="s2">: </span><span class="s1">participants</span><span class="s2">) {</span>
+<a name="l63"><span class="ln">63   </span></a>            <span class="s0">if </span><span class="s2">(!</span><span class="s1">participant</span><span class="s2">.</span><span class="s1">equals</span><span class="s2">(</span><span class="s1">getSelf</span><span class="s2">())) {</span>
+<a name="l64"><span class="ln">64   </span></a>                <span class="s1">participant</span><span class="s2">.</span><span class="s1">tell</span><span class="s2">(</span><span class="s0">new </span><span class="s1">Heartbeat</span><span class="s2">(), </span><span class="s1">getSelf</span><span class="s2">());</span>
+<a name="l65"><span class="ln">65   </span></a>            <span class="s2">}</span>
+<a name="l66"><span class="ln">66   </span></a>        <span class="s2">}</span>
+<a name="l67"><span class="ln">67   </span></a>    <span class="s2">}</span>
+<a name="l68"><span class="ln">68   </span></a>
+<a name="l69"><span class="ln">69   </span></a>    <span class="s1">@Override</span>
+<a name="l70"><span class="ln">70   </span></a>    <span class="s0">public void </span><span class="s1">preStart</span><span class="s2">() {</span>
+<a name="l71"><span class="ln">71   </span></a>        <span class="s1">startHeartbeat</span><span class="s2">();  </span><span class="s3">// Start sending heartbeats when the actor starts</span>
+<a name="l72"><span class="ln">72   </span></a>    <span class="s2">}</span>
+<a name="l73"><span class="ln">73   </span></a>
+<a name="l74"><span class="ln">74   </span></a>    <span class="s0">public void </span><span class="s1">onStartMessage</span><span class="s2">(</span><span class="s1">StartMessage msg</span><span class="s2">) {                   </span><span class="s3">/* Start */</span>
+<a name="l75"><span class="ln">75   </span></a>        <span class="s1">setGroup</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">);</span>
+<a name="l76"><span class="ln">76   </span></a>        <span class="s1">print</span><span class="s2">(</span><span class="s5">&quot;Sending vote request&quot;</span><span class="s2">);</span>
+<a name="l77"><span class="ln">77   </span></a>        <span class="s1">multicast</span><span class="s2">(</span><span class="s0">new </span><span class="s1">VoteRequest</span><span class="s2">());</span>
+<a name="l78"><span class="ln">78   </span></a>        <span class="s3">//multicastAndCrash(new VoteRequest(), 3000);</span>
+<a name="l79"><span class="ln">79   </span></a>        <span class="s1">setTimeout</span><span class="s2">(</span><span class="s1">VOTE_TIMEOUT</span><span class="s2">);</span>
+<a name="l80"><span class="ln">80   </span></a>        <span class="s3">//crash(5000);</span>
+<a name="l81"><span class="ln">81   </span></a>    <span class="s2">}</span>
+<a name="l82"><span class="ln">82   </span></a>
+<a name="l83"><span class="ln">83   </span></a>    <span class="s0">public void </span><span class="s1">onUpdateRequest</span><span class="s2">(</span><span class="s1">UpdateRequest msg</span><span class="s2">) {</span>
+<a name="l84"><span class="ln">84   </span></a>        <span class="s1">pendingValue </span><span class="s2">= </span><span class="s1">msg</span><span class="s2">.</span><span class="s1">newValue</span><span class="s2">;</span>
+<a name="l85"><span class="ln">85   </span></a>        <span class="s1">ackVoters</span><span class="s2">.</span><span class="s1">clear</span><span class="s2">();</span>
+<a name="l86"><span class="ln">86   </span></a>        <span class="s1">multicast</span><span class="s2">(</span><span class="s0">new </span><span class="s1">UpdateMessage</span><span class="s2">(</span><span class="s1">msg</span><span class="s2">.</span><span class="s1">newValue</span><span class="s2">));</span>
+<a name="l87"><span class="ln">87   </span></a>        <span class="s1">setTimeout</span><span class="s2">(</span><span class="s1">VOTE_TIMEOUT</span><span class="s2">);</span>
+<a name="l88"><span class="ln">88   </span></a>    <span class="s2">}</span>
+<a name="l89"><span class="ln">89   </span></a>
+<a name="l90"><span class="ln">90   </span></a>    <span class="s0">public void </span><span class="s1">onAcknowledge</span><span class="s2">(</span><span class="s1">Acknowledge msg</span><span class="s2">) {</span>
+<a name="l91"><span class="ln">91   </span></a>        <span class="s1">ackVoters</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">getSender</span><span class="s2">());</span>
+<a name="l92"><span class="ln">92   </span></a>        <span class="s0">if </span><span class="s2">(!</span><span class="s1">writeConfirmed </span><span class="s2">&amp;&amp; </span><span class="s1">ackVoters</span><span class="s2">.</span><span class="s1">size</span><span class="s2">() &gt;= (</span><span class="s1">N_REPLICAS </span><span class="s2">/ </span><span class="s4">2</span><span class="s2">) + </span><span class="s4">1</span><span class="s2">) {</span>
+<a name="l93"><span class="ln">93   </span></a>            <span class="s3">// Iterate over the participants and send the message only to replicas</span>
+<a name="l94"><span class="ln">94   </span></a>            <span class="s0">for </span><span class="s2">(</span><span class="s1">ActorRef participant </span><span class="s2">: </span><span class="s1">participants</span><span class="s2">) {</span>
+<a name="l95"><span class="ln">95   </span></a>                <span class="s0">if </span><span class="s2">(!</span><span class="s1">participant</span><span class="s2">.</span><span class="s1">equals</span><span class="s2">(</span><span class="s1">getSelf</span><span class="s2">())) {  </span><span class="s3">// Check to ensure not sending to self</span>
+<a name="l96"><span class="ln">96   </span></a>                    <span class="s1">participant</span><span class="s2">.</span><span class="s1">tell</span><span class="s2">(</span><span class="s0">new </span><span class="s1">WriteOk</span><span class="s2">(), </span><span class="s1">getSelf</span><span class="s2">());</span>
+<a name="l97"><span class="ln">97   </span></a>                <span class="s2">}</span>
+<a name="l98"><span class="ln">98   </span></a>            <span class="s2">}</span>
+<a name="l99"><span class="ln">99   </span></a>            <span class="s1">writeConfirmed </span><span class="s2">= </span><span class="s0">true</span><span class="s2">;  </span><span class="s3">// Set the flag to prevent further messages</span>
+<a name="l100"><span class="ln">100  </span></a>            <span class="s1">print</span><span class="s2">(</span><span class="s5">&quot;Write operation confirmed. Value updated to &quot; </span><span class="s2">+ </span><span class="s1">pendingValue</span><span class="s2">);</span>
+<a name="l101"><span class="ln">101  </span></a>        <span class="s2">}</span>
+<a name="l102"><span class="ln">102  </span></a>    <span class="s2">}</span>
+<a name="l103"><span class="ln">103  </span></a>
+<a name="l104"><span class="ln">104  </span></a>
+<a name="l105"><span class="ln">105  </span></a>    <span class="s0">public void </span><span class="s1">onVoteResponse</span><span class="s2">(</span><span class="s1">VoteResponse msg</span><span class="s2">) {                    </span><span class="s3">/* Vote */</span>
+<a name="l106"><span class="ln">106  </span></a>        <span class="s0">if </span><span class="s2">(</span><span class="s1">hasDecided</span><span class="s2">()) {</span>
+<a name="l107"><span class="ln">107  </span></a>
+<a name="l108"><span class="ln">108  </span></a>            <span class="s3">// we have already decided and sent the decision to the group,</span>
+<a name="l109"><span class="ln">109  </span></a>            <span class="s3">// so do not care about other votes</span>
+<a name="l110"><span class="ln">110  </span></a>            <span class="s0">return</span><span class="s2">;</span>
+<a name="l111"><span class="ln">111  </span></a>        <span class="s2">}</span>
+<a name="l112"><span class="ln">112  </span></a>        <span class="s1">Vote v </span><span class="s2">= (</span><span class="s1">msg</span><span class="s2">).</span><span class="s1">vote</span><span class="s2">;</span>
+<a name="l113"><span class="ln">113  </span></a>        <span class="s0">if </span><span class="s2">(</span><span class="s1">v </span><span class="s2">== </span><span class="s1">Vote</span><span class="s2">.</span><span class="s1">YES</span><span class="s2">) {</span>
+<a name="l114"><span class="ln">114  </span></a>            <span class="s1">yesVoters</span><span class="s2">.</span><span class="s1">add</span><span class="s2">(</span><span class="s1">getSender</span><span class="s2">());</span>
+<a name="l115"><span class="ln">115  </span></a>            <span class="s0">if </span><span class="s2">(</span><span class="s1">allVotedYes</span><span class="s2">()) {</span>
+<a name="l116"><span class="ln">116  </span></a>                <span class="s1">fixDecision</span><span class="s2">(</span><span class="s1">Decision</span><span class="s2">.</span><span class="s1">COMMIT</span><span class="s2">);</span>
+<a name="l117"><span class="ln">117  </span></a>                <span class="s3">//if (id==-1) {crash(3000); return;}</span>
+<a name="l118"><span class="ln">118  </span></a>                <span class="s1">multicast</span><span class="s2">(</span><span class="s0">new </span><span class="s1">DecisionResponse</span><span class="s2">(</span><span class="s1">decision</span><span class="s2">));</span>
+<a name="l119"><span class="ln">119  </span></a>                <span class="s3">//multicastAndCrash(new DecisionResponse(decision), 3000);</span>
+<a name="l120"><span class="ln">120  </span></a>            <span class="s2">}</span>
+<a name="l121"><span class="ln">121  </span></a>        <span class="s2">}</span>
+<a name="l122"><span class="ln">122  </span></a>        <span class="s0">else </span><span class="s2">{ </span><span class="s3">// a NO vote</span>
+<a name="l123"><span class="ln">123  </span></a>
+<a name="l124"><span class="ln">124  </span></a>            <span class="s3">// on a single NO we decide ABORT</span>
+<a name="l125"><span class="ln">125  </span></a>            <span class="s1">fixDecision</span><span class="s2">(</span><span class="s1">Decision</span><span class="s2">.</span><span class="s1">ABORT</span><span class="s2">);</span>
+<a name="l126"><span class="ln">126  </span></a>            <span class="s1">multicast</span><span class="s2">(</span><span class="s0">new </span><span class="s1">DecisionResponse</span><span class="s2">(</span><span class="s1">decision</span><span class="s2">));</span>
+<a name="l127"><span class="ln">127  </span></a>        <span class="s2">}</span>
+<a name="l128"><span class="ln">128  </span></a>    <span class="s2">}</span>
+<a name="l129"><span class="ln">129  </span></a>
+<a name="l130"><span class="ln">130  </span></a>    <span class="s0">public void </span><span class="s1">onTimeout</span><span class="s2">(</span><span class="s1">Timeout msg</span><span class="s2">) {</span>
+<a name="l131"><span class="ln">131  </span></a>        <span class="s0">if </span><span class="s2">(!</span><span class="s1">hasDecided</span><span class="s2">()) {</span>
+<a name="l132"><span class="ln">132  </span></a>            <span class="s1">print</span><span class="s2">(</span><span class="s5">&quot;Timeout&quot;</span><span class="s2">);</span>
+<a name="l133"><span class="ln">133  </span></a>
+<a name="l134"><span class="ln">134  </span></a>            <span class="s3">// not decided in time means ABORT</span>
+<a name="l135"><span class="ln">135  </span></a>            <span class="s1">fixDecision</span><span class="s2">(</span><span class="s1">Decision</span><span class="s2">.</span><span class="s1">ABORT</span><span class="s2">);</span>
+<a name="l136"><span class="ln">136  </span></a>            <span class="s1">multicast</span><span class="s2">(</span><span class="s0">new </span><span class="s1">DecisionResponse</span><span class="s2">(</span><span class="s1">Decision</span><span class="s2">.</span><span class="s1">ABORT</span><span class="s2">));</span>
+<a name="l137"><span class="ln">137  </span></a>        <span class="s2">}</span>
+<a name="l138"><span class="ln">138  </span></a>    <span class="s2">}</span>
+<a name="l139"><span class="ln">139  </span></a>
+<a name="l140"><span class="ln">140  </span></a>    <span class="s3">/*@Override 
+<a name="l141"><span class="ln">141  </span></a>    public void onRecovery(Recovery msg) { 
+<a name="l142"><span class="ln">142  </span></a>      getContext().become(createReceive()); 
+<a name="l143"><span class="ln">143  </span></a>      if (!hasDecided()) { 
+<a name="l144"><span class="ln">144  </span></a>        print(&quot;recovering, not decided&quot;); 
+<a name="l145"><span class="ln">145  </span></a> 
+<a name="l146"><span class="ln">146  </span></a>        // store the decision 
+<a name="l147"><span class="ln">147  </span></a>        fixDecision(Decision.ABORT); 
+<a name="l148"><span class="ln">148  </span></a>      } 
+<a name="l149"><span class="ln">149  </span></a>      else { 
+<a name="l150"><span class="ln">150  </span></a>        print(&quot;recovering, decided before crash&quot;); 
+<a name="l151"><span class="ln">151  </span></a>      } 
+<a name="l152"><span class="ln">152  </span></a> 
+<a name="l153"><span class="ln">153  </span></a>      multicast(new DecisionResponse(decision)); 
+<a name="l154"><span class="ln">154  </span></a>    }*/</span>
+<a name="l155"><span class="ln">155  </span></a><span class="s2">}</span>
+<a name="l156"><span class="ln">156  </span></a>
+<a name="l157"><span class="ln">157  </span></a>
+<a name="l158"><span class="ln">158  </span></a></pre>
+</body>
+</html>
