@@ -33,5 +33,5 @@ This project implements a protocol for coordinating a group of replicas in a dis
 1. **Clone the Repository**
 
    ```bash
-   git clone https://github.com/YourUsername/YourRepository.git
+   git clone https://github.com/FrancescaCapra/Distributed-System-Project.git
    cd YourRepository
